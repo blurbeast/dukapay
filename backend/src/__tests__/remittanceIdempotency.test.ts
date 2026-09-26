@@ -55,6 +55,7 @@ jest.unstable_mockModule('../db/connection.js', () => ({
   getClient: jest.fn(),
   closePool: jest.fn(),
   withTransaction: jest.fn(),
+  pool: { query: jest.fn(), connect: jest.fn(), end: jest.fn() },
 }));
 
 const { default: app } = await import('../app.js');

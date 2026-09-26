@@ -12,6 +12,7 @@ import {
   createRemittanceSchema,
   getRemittancesSchema,
   getRemittanceSchema,
+  submitRemittanceSchema,
 } from '../schemas/remittanceSchemas.js';
 
 const router = Router();
@@ -47,10 +48,10 @@ const router = Router();
  *                 description: Amount to send (in units)
  *               fromCurrency:
  *                 type: string
- *                 enum: [USDC, EURC, PHP]
+ *                 enum: [USDC, EURC, PHP, XLM]
  *               toCurrency:
  *                 type: string
- *                 enum: [USDC, EURC, PHP]
+ *                 enum: [USDC, EURC, PHP, XLM]
  *               memo:
  *                 type: string
  *                 description: Optional transaction memo (max 28 chars)
@@ -262,6 +263,7 @@ router.post(
   '/:id/submit',
   requireJwtAuth,
   requireScopes('write:remittances'),
+  validate(submitRemittanceSchema),
   idempotencyMiddleware,
   submitRemittanceTransaction,
 );
