@@ -94,3 +94,57 @@ export const contestDefaultSchema = z.object({
     .min(5, 'Reason must be at least 5 characters')
     .max(500, 'Reason cannot exceed 500 characters'),
 });
+
+export const testLoanAmountSchema = z.union([
+  z.number().positive('amount must be greater than 0'),
+  z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, 'amount must be a positive number')
+    .refine((val) => Number(val) > 0, 'amount must be greater than 0')
+    .transform((val) => Number(val)),
+]);
+
+export const testLoanRateSchema = z
+  .union([
+    z
+      .number()
+      .int('rate must be an integer')
+      .min(0, 'rate must be between 0 and 10000 bps')
+      .max(10000, 'rate must be between 0 and 10000 bps'),
+    z
+      .string()
+      .regex(/^\d+$/, 'rate must be an integer')
+      .transform((val) => Number(val))
+      .refine((val) => val >= 0 && val <= 10000, 'rate must be between 0 and 10000 bps'),
+  ])
+  .optional()
+  .default(1200);
+
+export const testLoanTermSchema = z.union([
+  z.number().int('term must be an integer').positive('term must be greater than 0'),
+  z
+    .string()
+    .regex(/^\d+$/, 'term must be a positive integer')
+    .transform((val) => Number(val))
+    .refine((val) => val > 0, 'term must be greater than 0'),
+]);
+
+export const createTestLoanBodySchema = z
+  .object({
+    borrower: stellarAddressSchema.optional(),
+    amount: testLoanAmountSchema,
+    rate: testLoanRateSchema,
+    term: testLoanTermSchema.optional(),
+    termDays: testLoanTermSchema.optional(),
+  })
+  .refine(
+    (data) => data.term !== undefined || data.termDays !== undefined,
+    'term or termDays is required and must be greater than 0',
+  );
+
+export const createTestLoanSchema = z.object({
+  body: createTestLoanBodySchema,
+});
+
+export type CreateTestLoanBody = z.infer<typeof createTestLoanBodySchema>;
+export type CreateTestLoanInput = z.infer<typeof createTestLoanSchema>;

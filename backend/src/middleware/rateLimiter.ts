@@ -170,3 +170,20 @@ export const scoreReadRateLimiter = createReadRateLimiter({
   max: 60,
   message: 'Too many score requests, please try again later.',
 });
+
+/** Test endpoints rate limiter: 30 req/min per IP to prevent automated abuse. */
+export const testEndpointsRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    message: 'Too many test requests, please try again later.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res, _next, options) => {
+    res.setHeader('Retry-After', Math.ceil(options.windowMs / 1000));
+    res.status(429).json(options.message);
+  },
+});

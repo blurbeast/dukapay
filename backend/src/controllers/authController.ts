@@ -2,24 +2,33 @@
  * POST /api/auth/register (TEST/DEV ONLY)
  * Registers a test user with email and password. Returns a fake JWT.
  */
-// Only import types once at the top
 import { getAuditLogs, type AuditLogFilters } from '../services/auditLogService.js';
 import type { Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { registerTestUserBodySchema } from '../schemas/authSchemas.js';
+import { isTestEndpointAllowed } from '../middleware/testEndpointGuard.js';
+import { AppError } from '../errors/AppError.js';
+
 export const registerTestUser = asyncHandler(
   async (req: Request, res: Response, _next: NextFunction) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      res.status(400).json({ success: false, message: 'Email and password required' });
-      return;
+    if (!isTestEndpointAllowed()) {
+      throw AppError.forbidden('Test endpoints are disabled in production');
     }
-    // In real app, insert user into DB. For test, just return a fake token.
-    // Use email as publicKey for test JWT.
-    const token = `test-jwt-for-${email}`;
-    res.json({ success: true, token });
+
+    const { email, publicKey, role } = registerTestUserBodySchema.parse(req.body);
+    const effectivePublicKey = publicKey || email;
+    const token = `test-jwt-for-${effectivePublicKey}`;
+    res.json({
+      success: true,
+      token,
+      user: {
+        email,
+        role: role ?? 'borrower',
+        ...(publicKey ? { publicKey } : {}),
+      },
+    });
   },
 );
-import { AppError } from '../errors/AppError.js';
 import { ErrorCode } from '../errors/errorCodes.js';
 import {
   generateChallenge,

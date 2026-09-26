@@ -6,11 +6,14 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { getLoanConfig } from '../config/loanConfig.js';
 import { ErrorCode } from '../errors/errorCodes.js';
 import { sorobanService } from '../services/sorobanService.js';
+import { StrKey } from '@stellar/stellar-sdk';
 import {
   rejectLoanSchema,
   markLoanDefaultedSchema,
   contestDefaultSchema,
+  createTestLoanBodySchema,
 } from '../schemas/loanSchemas.js';
+import { isTestEndpointAllowed } from '../middleware/testEndpointGuard.js';
 import { createCursorPaginatedResponse, parseCursorQueryParams } from '../utils/pagination.js';
 import logger from '../utils/logger.js';
 import { cacheService } from '../services/cacheService.js';
@@ -66,12 +69,18 @@ const loanTermConfig = getLoanTermConfig();
  */
 export const createTestLoan = asyncHandler(
   async (req: Request, res: Response, _next: NextFunction) => {
-    const { amount, term } = req.body;
-    const borrower = req.user?.publicKey || 'test-borrower';
+    if (!isTestEndpointAllowed()) {
+      throw AppError.forbidden('Test endpoints are disabled in production');
+    }
 
-    if (!amount || !term) {
-      res.status(400).json({ success: false, message: 'amount and term required' });
-      return;
+    const validated = createTestLoanBodySchema.parse(req.body);
+    const amount = validated.amount;
+    const rate = validated.rate ?? 1200;
+    const term = (validated.termDays ?? validated.term) as number;
+    const borrower = validated.borrower || req.user?.publicKey;
+
+    if (!borrower || !StrKey.isValidEd25519PublicKey(borrower)) {
+      throw AppError.badRequest('Valid Stellar borrower address required');
     }
 
     const loanResult = await query(
@@ -81,14 +90,14 @@ export const createTestLoan = asyncHandler(
     const loanId = loanResult.rows[0].loan_id;
 
     await query(
-      `INSERT INTO contract_events (loan_id, address, event_type, amount, interest_rate_bps, term_ledgers, ledger, ledger_closed_at) VALUES ($1, $2, 'LoanApproved', $3, 1200, $4, NULL, NOW())`,
-      [loanId, borrower, amount, term],
+      `INSERT INTO contract_events (loan_id, address, event_type, amount, interest_rate_bps, term_ledgers, ledger, ledger_closed_at) VALUES ($1, $2, 'LoanApproved', $3, $4, $5, NULL, NOW())`,
+      [loanId, borrower, amount, rate, term],
     );
 
     res.json({
       success: true,
       id: loanId,
-      loan: { id: loanId, amount, term, borrower },
+      loan: { id: loanId, amount, term, borrower, rate },
     });
   },
 );

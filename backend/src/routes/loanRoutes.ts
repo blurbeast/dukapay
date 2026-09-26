@@ -37,7 +37,10 @@ import {
   extendLoanSchema,
   liquidateLoanSchema,
   borrowerLoansQuerySchema,
+  createTestLoanSchema,
 } from '../schemas/loanSchemas.js';
+import { testEndpointsRateLimiter } from '../middleware/rateLimiter.js';
+import { disableInProduction } from '../middleware/testEndpointGuard.js';
 
 import { buildCancelLoanTx } from '../controllers/loanController.js';
 
@@ -45,7 +48,14 @@ const router = Router();
 
 // TEST/DEV ONLY: Create a loan directly for test setup
 if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
-  router.post('/', requireJwtAuth, createTestLoan);
+  router.post(
+    '/',
+    disableInProduction,
+    testEndpointsRateLimiter,
+    requireJwtAuth,
+    validate(createTestLoanSchema),
+    createTestLoan,
+  );
 }
 
 // TEST/DEV ONLY: Mark a loan as defaulted for test setup

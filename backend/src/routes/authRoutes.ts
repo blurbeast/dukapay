@@ -14,16 +14,25 @@ import {
   challengeRateLimiter,
   loginRateLimiter,
   ipLoginRateLimiter,
+  testEndpointsRateLimiter,
 } from '../middleware/rateLimiter.js';
 import { getCsrfTokenController } from '../middleware/csrf.js';
 import { requireJwtAuth } from '../middleware/jwtAuth.js';
-import { validateBody } from '../middleware/validation.js';
+import { validate, validateBody } from '../middleware/validation.js';
+import { registerTestUserSchema } from '../schemas/authSchemas.js';
+import { disableInProduction } from '../middleware/testEndpointGuard.js';
 
 const router = Router();
 
 // TEST/DEV ONLY: Register a test user
 if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
-  router.post('/register', registerTestUser);
+  router.post(
+    '/register',
+    disableInProduction,
+    testEndpointsRateLimiter,
+    validate(registerTestUserSchema),
+    registerTestUser,
+  );
 }
 
 const challengeSchema = z.object({
