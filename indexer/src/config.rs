@@ -35,6 +35,10 @@ pub struct Config {
     pub metrics_port: u16,
     /// Alert threshold (in ledgers) used only to flip the `indexer_lag_ok` gauge.
     pub lag_alert_threshold: i64,
+    /// Maximum allowable ledger lag before `/healthz` reports unhealthy.
+    pub health_max_lag: i64,
+    /// Maximum allowable age of the last saved checkpoint (in seconds) before `/healthz` reports unhealthy.
+    pub health_max_checkpoint_age_secs: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -147,7 +151,20 @@ impl Config {
             sink,
             metrics_port: parse("INDEXER_METRICS_PORT", 9464u16)?,
             lag_alert_threshold: parse("INDEXER_LAG_ALERT_THRESHOLD", 100i64)?,
+            health_max_lag: parse("INDEXER_HEALTH_MAX_LAG", 100i64)?,
+            health_max_checkpoint_age_secs: parse(
+                "INDEXER_HEALTH_MAX_CHECKPOINT_AGE_SECS",
+                300u64,
+            )?,
         })
+    }
+
+    /// Kafka broker addresses if configured (either via `INDEXER_SINK=kafka` or `INDEXER_KAFKA_BROKERS`).
+    pub fn kafka_brokers(&self) -> Option<String> {
+        match &self.sink {
+            SinkBackend::Kafka { brokers, .. } => Some(brokers.clone()),
+            _ => env("INDEXER_KAFKA_BROKERS"),
+        }
     }
 
     /// Deterministic shard assignment for a contract ID.

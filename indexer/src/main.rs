@@ -33,6 +33,15 @@ async fn main() -> Result<()> {
     );
 
     let metrics_port = cfg.metrics_port;
+    metrics::init_startup_time();
+    metrics::set_health_context(metrics::HealthContext {
+        rpc: Some(rpc::SorobanRpc::new(cfg.rpc_url.clone())),
+        checkpoints: None,
+        kafka_brokers: cfg.kafka_brokers(),
+        max_lag: cfg.health_max_lag,
+        max_checkpoint_age_secs: cfg.health_max_checkpoint_age_secs,
+    });
+
     let metrics_task = tokio::spawn(async move {
         if let Err(e) = metrics::serve(metrics_port).await {
             tracing::error!(error = %e, "metrics server crashed");

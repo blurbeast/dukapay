@@ -13,6 +13,9 @@ use tokio::sync::Mutex;
 pub trait CheckpointStore: Send + Sync {
     async fn load(&self, shard: u32, contract: &str) -> Result<Option<u32>>;
     async fn save(&self, shard: u32, contract: &str, ledger: u32) -> Result<()>;
+    async fn check_health(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ── File-backed ───────────────────────────────────────────────────────────────
@@ -58,6 +61,21 @@ impl CheckpointStore for FileCheckpointStore {
         let tmp = format!("{}.tmp", self.path);
         tokio::fs::write(&tmp, serde_json::to_vec_pretty(&*cache)?).await?;
         tokio::fs::rename(&tmp, &self.path).await?;
+        Ok(())
+    }
+
+    async fn check_health(&self) -> Result<()> {
+        let p = std::path::Path::new(&self.path);
+        if p.exists() {
+            let meta = tokio::fs::metadata(p).await?;
+            if meta.permissions().readonly() {
+                anyhow::bail!("checkpoint file {} is read-only", self.path);
+            }
+        } else if let Some(parent) = p.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                anyhow::bail!("checkpoint directory {} does not exist", parent.display());
+            }
+        }
         Ok(())
     }
 }
@@ -124,6 +142,14 @@ impl CheckpointStore for PgCheckpointStore {
         .await?;
         Ok(())
     }
+
+    async fn check_health(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("checkpoint postgres ping failed: {e}"))?;
+        Ok(())
+    }
 }
 
 // ── Dyn wrapper ───────────────────────────────────────────────────────────────
@@ -150,6 +176,14 @@ impl AnyCheckpointStore {
             Self::File(s) => s.save(shard, contract, ledger).await,
             #[cfg(feature = "postgres")]
             Self::Pg(s) => s.save(shard, contract, ledger).await,
+        }
+    }
+
+    pub async fn check_health(&self) -> Result<()> {
+        match self {
+            Self::File(s) => s.check_health().await,
+            #[cfg(feature = "postgres")]
+            Self::Pg(s) => s.check_health().await,
         }
     }
 }

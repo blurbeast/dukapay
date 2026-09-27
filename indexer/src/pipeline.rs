@@ -67,15 +67,32 @@ pub async fn run(cfg: Config) -> Result<()> {
     }
     drop(tx);
 
+    metrics::init_startup_time();
+    metrics::set_health_context(metrics::HealthContext {
+        rpc: Some(rpc.clone()),
+        checkpoints: Some(checkpoints.clone()),
+        kafka_brokers: cfg.kafka_brokers(),
+        max_lag: cfg.health_max_lag,
+        max_checkpoint_age_secs: cfg.health_max_checkpoint_age_secs,
+    });
+
     metrics::set_ready(true);
+    metrics::set_processing_active(true);
 
     // If any fetcher exits it is fatal — let the process restart under the orchestrator.
     for f in fetchers {
-        f.await??;
+        if let Err(e) = f.await? {
+            metrics::set_processing_active(false);
+            return Err(e);
+        }
     }
     for w in workers {
-        w.await??;
+        if let Err(e) = w.await? {
+            metrics::set_processing_active(false);
+            return Err(e);
+        }
     }
+    metrics::set_processing_active(false);
     Ok(())
 }
 
@@ -128,9 +145,7 @@ async fn fetcher_loop(
         };
         let safe_tip = tip.saturating_sub(cfg.finality_depth);
         let lag = safe_tip as i64 - next_ledger as i64;
-        metrics::LEDGER_LAG
-            .with_label_values(&[&contract])
-            .set(lag.max(0));
+        metrics::record_lag(&contract, lag);
         metrics::LAG_OK.set(if lag <= cfg.lag_alert_threshold { 1 } else { 0 });
 
         if next_ledger > safe_tip {
@@ -287,11 +302,39 @@ async fn worker_loop(
                 metrics::LAST_PROCESSED_LEDGER
                     .with_label_values(&[&batch.contract_id])
                     .set(batch.through_ledger as i64);
+                metrics::record_checkpoint_saved();
             }
         }
         tracing::debug!(worker = id, contract = %batch.contract_id, events = n, through = batch.through_ledger, "batch done");
         let _ = batch.done.send(!batch_failed);
     }
+}
+
+/// Decode an RPC event into the normalised sink shape. The heavy XDR→native
+/// decoding still lives in the TypeScript consumer; here we pass through the
+/// base64 topics/value and the event type symbol so the pipeline stays cheap.
+fn decode(raw: &RawEvent, shard: u32) -> Result<DecodedEvent> {
+    let event_type = raw
+        .topic
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_string());
+    Ok(DecodedEvent {
+        id: raw.id.clone(),
+        paging_token: if raw.paging_token.is_empty() {
+            raw.id.clone()
+        } else {
+            raw.paging_token.clone()
+        },
+        contract_id: raw.contract_id.clone(),
+        event_type,
+        ledger: raw.ledger,
+        ledger_closed_at: raw.ledger_closed_at.clone(),
+        tx_hash: raw.tx_hash.clone(),
+        topics: raw.topic.clone(),
+        value: raw.value.clone(),
+        shard,
+    })
 }
 
 #[cfg(test)]
@@ -340,6 +383,8 @@ mod tests {
             sink: SinkBackend::Stdout,
             metrics_port: 0,
             lag_alert_threshold: 100,
+            health_max_lag: 100,
+            health_max_checkpoint_age_secs: 300,
         });
         let dead_letters = DeadLetterQueue::new(cfg.dead_letter_file.clone())
             .await
@@ -394,31 +439,4 @@ mod tests {
             .unwrap());
         tokio::fs::remove_dir_all(root).await.unwrap();
     }
-}
-
-/// Decode an RPC event into the normalised sink shape. The heavy XDR→native
-/// decoding still lives in the TypeScript consumer; here we pass through the
-/// base64 topics/value and the event type symbol so the pipeline stays cheap.
-fn decode(raw: &RawEvent, shard: u32) -> Result<DecodedEvent> {
-    let event_type = raw
-        .topic
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "unknown".to_string());
-    Ok(DecodedEvent {
-        id: raw.id.clone(),
-        paging_token: if raw.paging_token.is_empty() {
-            raw.id.clone()
-        } else {
-            raw.paging_token.clone()
-        },
-        contract_id: raw.contract_id.clone(),
-        event_type,
-        ledger: raw.ledger,
-        ledger_closed_at: raw.ledger_closed_at.clone(),
-        tx_hash: raw.tx_hash.clone(),
-        topics: raw.topic.clone(),
-        value: raw.value.clone(),
-        shard,
-    })
 }
